@@ -124,6 +124,13 @@ function enqueue(contactId, task) {
   setImmediate(processNext);
 }
 
+function enqueueFront(contactId, task) {
+  state.pending.unshift({ contactId, task });
+  const live = Array.from(state.inFlightCalls.values()).map(c => c.contactId).join(', ');
+  console.log(`⚡ [queue] Priority retry for ${contactId} — pushed to front of queue (${state.pending.length} total).${live ? ` Currently calling ${live}.` : ''}`);
+  setImmediate(processNext);
+}
+
 function getStatus() {
   rollDailyIfNeeded();
   return {
@@ -138,4 +145,4 @@ function getStatus() {
   };
 }
 
-module.exports = { enqueue, getStatus, markCallFinished };
+module.exports = { enqueue, enqueueFront, getStatus, markCallFinished };

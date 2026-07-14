@@ -5,6 +5,7 @@ const { isWithinCallingHours } = require('../utils/callingHours');
 const { parseDemoTime } = require('../utils/parseDemoTime');
 const { DateTime } = require('luxon');
 const config = require('../config');
+const { enqueueFront } = require('../utils/callQueue');
 
 function pickPhone(contact) {
   return contact?.phone || contact?.phoneNumber || null;
@@ -183,7 +184,7 @@ function buildNote(vapiReport, outcome) {
       `Outcome: no-answer`,
       `Reason: ${reasonPretty}`,
       durationStr ? `Ring duration: ${durationStr}` : null,
-      `Next step: lead remains in queue — will be retried tomorrow.`,
+      `Next step: retrying immediately (attempt 2).`,
     ].filter(Boolean);
     return lines.join('\n');
   }
@@ -234,7 +235,7 @@ async function handleCallOutcome(vapiReport) {
       isNoAnswerFinal = true;
       console.log(`[outcome] no-answer attempt 2 (retry exhausted) — closing as no-answer-final`);
     } else {
-      console.log(`[outcome] no-answer attempt 1 — will be retried in 30 min via GHL workflow`);
+      console.log(`[outcome] no-answer attempt 1 — re-queuing immediately for second dial`);
     }
   }
 
@@ -254,8 +255,8 @@ async function handleCallOutcome(vapiReport) {
     // Attempt 2 missed — give up. Drop retry tag + queue, mark final + done.
     tagPlan = { add: [tags.noAnswerFinal, tags.coldCallDone], remove: [tags.noAnswerRetry, tags.queue, tags.productionQueue] };
   } else if (outcome === 'no-answer') {
-    // Attempt 1 missed — flag for retry. GHL workflow re-adds queue tag after 30 min.
-    tagPlan = { add: [tags.noAnswer, tags.noAnswerRetry], remove: [tags.queue, tags.productionQueue] };
+    // Attempt 1 missed — flag for retry. Keep queue tag so re-enqueue works immediately.
+    tagPlan = { add: [tags.noAnswer, tags.noAnswerRetry], remove: [] };
   } else {
     // Reached the lead — clear any pending retry flag along with the normal tag changes
     tagPlan = {
@@ -284,6 +285,12 @@ async function handleCallOutcome(vapiReport) {
     } catch (err) {
       console.error(`[ghl] ❌ remove tags FAILED:`, err.response?.data || err.message);
     }
+  }
+
+  // Attempt 1 no-answer: immediately re-enqueue for second dial (no GHL workflow needed)
+  if (outcome === 'no-answer' && !isNoAnswerFinal) {
+    console.log(`[outcome] Scheduling immediate retry for ${contactId} — front of queue`);
+    enqueueFront(contactId, () => triggerCallForContact(contactId));
   }
 
   if (config.pipeline.id) {
