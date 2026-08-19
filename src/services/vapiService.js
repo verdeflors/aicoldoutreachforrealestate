@@ -23,7 +23,7 @@ async function createOutboundCall({ phoneNumber, contactId, name, firstName, met
     },
     assistantOverrides: {
       variableValues: {
-        first_name: (firstName && firstName.trim()) || 'there',
+        first_name: name || 'there',
       },
     },
     metadata: {
